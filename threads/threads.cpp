@@ -10,16 +10,21 @@ volatile int sumNaive = 0;
 volatile int sumMutex = 0;
 auto_init_mutex(m);
 
+void core1_entry()
+{
+    while (true)
+    {
+        void (*f)() = (void (*)())multicore_fifo_pop_blocking();
+        f();
+        multicore_fifo_push_blocking(0);
+    }
+}
+
 void sumUpNaiveCore1()
 {
     for (int i = toSum.size() / 2; i < toSum.size(); i++)
     {
         sumNaive += toSum[i];
-    }
-    multicore_fifo_push_blocking(0);
-    while (true)
-    {
-        tight_loop_contents();
     }
 }
 
@@ -31,32 +36,28 @@ void sumUpMutexCore1()
         sumMutex += toSum[i];
         mutex_exit(&m);
     }
-    multicore_fifo_push_blocking(0);
-    while (true)
-    {
-        tight_loop_contents();
-    }
 }
 
 int main()
 {
     stdio_init_all();
+    multicore_launch_core1(core1_entry);
+    volatile int r;
 
     while (true)
     {
         sumNaive = 0;
         sumMutex = 0;
 
-        multicore_launch_core1(sumUpNaiveCore1);
+        multicore_fifo_push_blocking((uintptr_t)&sumUpNaiveCore1);
 
         for (int i = 0; i < toSum.size() / 2; i++)
         {
             sumNaive += toSum[i];
         }
 
-        assert(multicore_fifo_pop_blocking() == 0);
-        multicore_reset_core1();
-        multicore_launch_core1(sumUpMutexCore1);
+        r = multicore_fifo_pop_blocking();
+        multicore_fifo_push_blocking((uintptr_t)&sumUpMutexCore1);
 
         for (int i = 0; i < toSum.size() / 2; i++)
         {
@@ -65,8 +66,7 @@ int main()
             mutex_exit(&m);
         }
 
-        assert(multicore_fifo_pop_blocking() == 0);
-        multicore_reset_core1();
+        r = multicore_fifo_pop_blocking();
 
         std::cout << "Naive sum: " << sumNaive << std::endl;
         std::cout << "Mutex sum: " << sumMutex << std::endl;
